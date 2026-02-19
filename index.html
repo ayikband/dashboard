@@ -53,13 +53,7 @@
                 </svg>
                 Kurlar
             </button>
-            <button id="targetsBtn" class="btn btn-secondary">
-                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                    <path
-                        d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zM4.5 7.5a.5.5 0 0 0 0 1h5.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708l-3-3a.5.5 0 1 0-.708.708L10.293 7.5H4.5z" />
-                </svg>
-                Hedefler
-            </button>
+
         </div>
     </header>
 
@@ -79,6 +73,16 @@
 
     <!-- Main Dashboard -->
     <main id="mainDashboard" class="hidden">
+
+        <!-- Print Header (Visible only in PDF) -->
+        <div id="printHeader" class="print-header">
+            <img src="https://www.konveyorbant.com/wp-content/themes/ayik-band/assets/image/logo/logo2.svg" alt="Logo"
+                class="print-logo">
+            <div class="print-text">
+                <h1>Ayık Band Satış Raporu</h1>
+                <p id="printDateRange">--</p>
+            </div>
+        </div>
 
         <!-- Sticky Filter Bar -->
         <section class="filter-bar">
@@ -160,26 +164,57 @@
                     </div>
                 </div>
                 <!-- Progress Bar Section -->
-                <div class="target-progress-bar-container">
-                    <div class="progress-info">
-                        <span class="progress-label">Genel Hedef Tamamlanma</span>
-                        <span class="progress-percent" id="globalProgressText">0%</span>
-                    </div>
-                    <div class="progress-track">
-                        <div class="progress-fill" id="globalProgressBar" style="width: 0%"></div>
-                    </div>
-                </div>
+
                 <div class="chart-container">
                     <canvas id="chartTrend"></canvas>
                 </div>
-            </div>
-            <div class="card chart-card">
-                <h3>Bölge Müdürü Performansı / Hedef</h3>
-                <div class="chart-container">
-                    <canvas id="chartManager"></canvas>
+
+                <!-- Corporate Targets Infographics -->
+                <div class="corporate-targets-grid" id="corporateTargetsSection">
+                    <!-- Daily Target -->
+                    <div class="target-infographic">
+                        <div class="info-header">
+                            <span class="info-label">Günlük Hedef (Kümülatif) <small id="dailyTgtVal">--</small></span>
+                            <span class="info-percent" id="infoDailyPct">0%</span>
+                        </div>
+                        <div class="progress-track chic">
+                            <div class="progress-fill chic-gradient" id="progDaily" style="width: 0%"></div>
+                        </div>
+                        <div class="info-sub">Gerçekleşen: <span id="infoDailyAct">--</span></div>
+                    </div>
+
+                    <!-- Quarterly Target -->
+                    <div class="target-infographic">
+                        <div class="info-header">
+                            <span class="info-label">Çeyreklik Hedef <small>2.625.000 €</small></span>
+                            <span class="info-percent" id="infoQuarterPct">0%</span>
+                        </div>
+                        <div class="progress-track chic">
+                            <div class="progress-fill chic-gradient" id="progQuarter" style="width: 0%"></div>
+                        </div>
+                        <div class="info-sub">Gerçekleşen: <span id="infoQuarterAct">--</span></div>
+                    </div>
+
+                    <!-- Annual Target -->
+                    <div class="target-infographic">
+                        <div class="info-header">
+                            <span class="info-label">Yıllık Hedef <small>10.500.000 €</small></span>
+                            <span class="info-percent" id="infoAnnualPct">0%</span>
+                        </div>
+                        <div class="progress-track chic">
+                            <div class="progress-fill chic-gradient" id="progAnnual" style="width: 0%"></div>
+                        </div>
+                        <div class="info-sub">Gerçekleşen: <span id="infoAnnualAct">--</span></div>
+                    </div>
                 </div>
             </div>
-            <div class="card chart-card">
+            <div class="card chart-card" id="cardManagerTargets">
+                <h3>Bölge Müdürü Hedef Takibi</h3>
+                <div id="managerTargetsContainer" class="manager-targets-grid">
+                    <!-- Injected by JS -->
+                </div>
+            </div>
+            <div class="card chart-card" id="cardCurrency">
                 <h3>Döviz Dağılımı </h3>
                 <div class="chart-with-legend-side">
                     <div class="chart-wrapper">
@@ -188,13 +223,13 @@
                     <div id="legendCurrency" class="custom-legend"></div>
                 </div>
             </div>
-            <div class="card chart-card">
+            <div class="card chart-card" id="cardRegion">
                 <h3>Bölgesel Dağılım</h3>
                 <div class="chart-container">
                     <canvas id="chartRegion"></canvas>
                 </div>
             </div>
-            <div class="card chart-card">
+            <div class="card chart-card" id="cardTop5">
                 <h3>En Büyük 5 Satış</h3>
                 <div class="chart-container">
                     <div id="topInvoicesList" class="top-invoices-list"></div>
@@ -260,26 +295,7 @@
 
     </main>
 
-    <!-- Targets Modal -->
-    <div id="targetsModal" class="modal-backdrop hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Satış Hedeflerini Belirle (Çeyreklik - EUR)</h3>
-                <button class="close-modal" id="closeTargetsBtn">×</button>
-            </div>
-            <div class="modal-body">
-                <p class="hint">Tespit edilen her bölge müdürü için EUR cinsinden hedefleri girin. Hedefler yerel olarak
-                    kaydedilir.</p>
-                <div id="targetsList" class="targets-list">
-                    <!-- Inputs injected here -->
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-outline" id="resetTargetsBtn">Tümünü Sıfırla</button>
-                <button class="btn btn-primary" id="saveTargetsBtn">Kaydet & Uygula</button>
-            </div>
-        </div>
-    </div>
+
 
     <!-- Rates Modal -->
     <div id="ratesModal" class="modal-backdrop hidden">
