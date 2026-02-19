@@ -8,7 +8,11 @@ const state = {
     rawData: [],        // Full dataset from Excel
     filteredData: [],   // Currently active dataset
     managers: [],       // List of unique managers
-    targets: {},        // Manager Name -> Target (EUR)
+    targets: {
+        "KAMİL ŞEREFOĞLU": 4300000,
+        "KORCAN TÜRKMEN": 2600000,
+        "NASUH DURMAZ": 3600000
+    },        // Manager Name -> Target (EUR)
     filters: {
         month: '',
         manager: '',
@@ -59,7 +63,6 @@ const FORMATTER = {
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
     initEvents();
-    loadTargets();
     loadRates();
 });
 
@@ -76,14 +79,6 @@ function initEvents() {
     document.getElementById('currencyToggle').addEventListener('change', (e) => {
         state.settings.useNormalized = e.target.checked;
         updateDashboard();
-    });
-
-    // Targets Modal
-    document.getElementById('targetsBtn').addEventListener('click', openTargetsModal);
-    document.getElementById('closeTargetsBtn').addEventListener('click', () => toggleModal('targetsModal', false));
-    document.getElementById('saveTargetsBtn').addEventListener('click', saveTargets);
-    document.getElementById('resetTargetsBtn').addEventListener('click', () => {
-        if (confirm('Tüm hedefler sıfırlansın mı?')) { state.targets = {}; saveTargets(); }
     });
 
     // Rates Modal
@@ -303,8 +298,15 @@ function parseNumberTR(val) {
 // --- Filtering & Logic ---
 function updateFilter(key, val) {
     if (key === 'filterMonth') state.filters.month = val;
-    if (key === 'filterManager') state.filters.manager = val;
-    if (key === 'filterRegion') state.filters.region = val;
+    if (key === 'filterManager') {
+        state.filters.manager = val;
+        updateRegionOptions();
+        updateCityOptions();
+    }
+    if (key === 'filterRegion') {
+        state.filters.region = val;
+        updateCityOptions();
+    }
     if (key === 'filterCity') state.filters.city = val;
     if (key === 'filterType') state.filters.type = val;
     if (key === 'filterCurrency') state.filters.currency = val;
@@ -312,6 +314,56 @@ function updateFilter(key, val) {
 
     state.settings.currentPage = 1;
     applyFilters();
+}
+
+function updateRegionOptions() {
+    let data = state.rawData;
+    // Filter by Manager first
+    if (state.filters.manager) {
+        data = data.filter(r => r.manager === state.filters.manager);
+    }
+
+    const regions = [...new Set(data.map(r => r.region))].sort();
+    populateDropdown('filterRegion', regions);
+
+    // Sync state if current selection is no longer valid (or just re-read value)
+    // If the previously selected region (state.filters.region) is NOT in the new list, it implicitly becomes "" (All)
+    // because populateDropdown preserves the value ONLY if it exists in the new options (standard browser behavior for select?)
+    // Actually standard behavior: if value is not in options, it switches to first option usually.
+    // populateDropdown tries to set .value = current. If it fails, it might default to empty.
+
+    // Let's force check
+    const sel = document.getElementById('filterRegion');
+    if (!regions.includes(state.filters.region)) {
+        sel.value = "";
+        state.filters.region = "";
+    } else {
+        sel.value = state.filters.region;
+    }
+}
+
+function updateCityOptions() {
+    let data = state.rawData;
+    // Filter by Manager
+    if (state.filters.manager) {
+        data = data.filter(r => r.manager === state.filters.manager);
+    }
+    // Filter by Region
+    if (state.filters.region) {
+        data = data.filter(r => r.region === state.filters.region);
+    }
+
+    const cities = [...new Set(data.map(r => r.city))].sort();
+    populateDropdown('filterCity', cities);
+
+    // Sync state
+    const sel = document.getElementById('filterCity');
+    if (!cities.includes(state.filters.city)) {
+        sel.value = "";
+        state.filters.city = "";
+    } else {
+        sel.value = state.filters.city;
+    }
 }
 
 function resetFilters() {
@@ -341,6 +393,8 @@ function applyFilters() {
 function updateDashboard() {
     try { renderKPIs(); } catch (e) { console.error("KPI Error:", e); }
     try { renderCharts(); } catch (e) { console.error("Chart Error:", e); }
+    try { renderCorporateTargets(); } catch (e) { console.error("Corp Target Error:", e); }
+    try { renderManagerTargets(); } catch (e) { console.error("Mgr Target Error:", e); }
     try { renderTopManagerCustomers(); } catch (e) { console.error("Top Customers Error:", e); }
     try {
         sortData();
@@ -478,32 +532,20 @@ function renderKPIs() {
         if (attainment >= 100) kpiValEl.style.color = '#27C485';
         else kpiValEl.style.color = '';
 
-        // Update Progress Bar
-        const bar = document.getElementById('globalProgressBar');
-        const text = document.getElementById('globalProgressText');
-        if (bar && text) {
-            bar.style.width = `${Math.min(attainment, 100)}%`;
-            text.textContent = `%${attainment.toFixed(1)}`;
-        }
+
 
     } else {
         document.getElementById('kpiTargetAttainment').textContent = "Hedef: --";
         document.getElementById('kpiNetSales').style.color = '';
 
-        // Reset Progress Bar
-        const bar = document.getElementById('globalProgressBar');
-        const text = document.getElementById('globalProgressText');
-        if (bar && text) {
-            bar.style.width = '0%';
-            text.textContent = '0%';
-        }
+
     }
 }
 
 // --- Charts ---
 function renderCharts() {
     const ctxTrend = document.getElementById('chartTrend').getContext('2d');
-    const ctxMgr = document.getElementById('chartManager').getContext('2d');
+    // const ctxMgr = document.getElementById('chartManager').getContext('2d'); // Removed
     const ctxCurr = document.getElementById('chartCurrency').getContext('2d');
     const ctxReg = document.getElementById('chartRegion').getContext('2d');
 
@@ -712,92 +754,7 @@ function renderCharts() {
         }
     });
 
-    // 2. Manager Performance (Layered Progress Bar)
-    const mgrMap = {};
-    state.filteredData.forEach(r => {
-        mgrMap[r.manager] = (mgrMap[r.manager] || 0) + r.netEur;
-    });
 
-    const mgrKeys = Object.keys(mgrMap).sort((a, b) => mgrMap[b] - mgrMap[a]); // Sort by Sales Desc
-    const actuals = mgrKeys.map(k => mgrMap[k]);
-    const targets = mgrKeys.map(k => state.targets[k] || 0);
-
-    // Conditional Colors for Actuals
-    const performanceColors = mgrKeys.map((k, i) => {
-        const acc = actuals[i];
-        const tgt = targets[i];
-        if (!tgt) return '#72B2E2'; // No target = Blue default
-        return acc >= tgt ? '#27C485' : '#E74C3C'; // Green if >= Target, Red if <
-    });
-
-    // Rich Labels
-    const richLabels = mgrKeys.map((k, i) => {
-        const acc = actuals[i];
-        const tgt = targets[i];
-        const pct = tgt > 0 ? Math.round((acc / tgt) * 100) : 0;
-        return `${k} (${tgt ? pct + '%' : 'No Target'})`;
-    });
-
-    createOrUpdateChart('mgr', ctxMgr, {
-        type: 'bar',
-        data: {
-            labels: richLabels,
-            datasets: [
-                // Actuals (Foreground)
-                {
-                    label: 'Gerçekleşen',
-                    data: actuals,
-                    backgroundColor: performanceColors,
-                    borderRadius: 4,
-                    barPercentage: 0.6,
-                    order: 1, // Draw on top
-                    grouped: false // Allow overlap
-                },
-                // Targets (Background Track)
-                {
-                    label: 'Hedef',
-                    data: targets,
-                    backgroundColor: '#CBD5E0', // Light Gray track
-
-                    borderRadius: 4,
-                    barPercentage: 0.6,
-                    order: 2, // Draw behind
-                    grouped: false // Allow overlap
-                }
-            ]
-        },
-        options: {
-            indexAxis: 'y',
-            maintainAspectRatio: false,
-            scales: {
-                x: {
-                    grid: { color: '#E2E8F0' },
-                    beginAtZero: true,
-                    ticks: { color: '#718096' }
-                },
-                y: {
-                    grid: { display: false },
-                    ticks: {
-                        color: '#2D3748',
-                        font: { weight: 'bold' }
-                    }
-                }
-            },
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => {
-                            const raw = ctx.raw;
-                            return ` ${ctx.dataset.label}: ${FORMATTER.currency(raw, 'EUR')}`;
-                        }
-                    }
-                },
-                legend: {
-                    labels: { color: '#718096' }
-                }
-            }
-        }
-    });
 
     // 3. Currency Doughnut
     const currMap = {};
@@ -1040,45 +997,7 @@ function toggleModal(id, show) {
     else el.classList.add('hidden');
 }
 
-// --- Targets Logic ---
-function loadTargets() {
-    const saved = localStorage.getItem('ayik_targets');
-    if (saved) state.targets = JSON.parse(saved);
-}
 
-function openTargetsModal() {
-    // Refresh manager list in case file changed
-    const list = document.getElementById('targetsList');
-    list.innerHTML = '';
-
-    const mgrs = state.managers.length ? state.managers : Object.keys(state.targets); // fallback if no file loaded
-
-    mgrs.forEach(m => {
-        const div = document.createElement('div');
-        div.className = 'target-item';
-        div.innerHTML = `
-            <label>${m}</label>
-            <input type="number" data-manager="${m}" value="${state.targets[m] || ''}" placeholder="EUR Target">
-        `;
-        list.appendChild(div);
-    });
-
-    toggleModal('targetsModal', true);
-}
-
-function saveTargets() {
-    const inputs = document.querySelectorAll('#targetsList input');
-    inputs.forEach(inp => {
-        const val = parseFloat(inp.value);
-        const m = inp.dataset.manager;
-        if (!isNaN(val)) state.targets[m] = val;
-        else delete state.targets[m]; // remove if empty
-    });
-
-    localStorage.setItem('ayik_targets', JSON.stringify(state.targets));
-    toggleModal('targetsModal', false);
-    updateDashboard(); // Re-calc KPI
-}
 
 // --- Rates Logic ---
 function loadRates() {
@@ -1200,7 +1119,218 @@ function getISOWeekNumber(d) {
 
 }
 
-// --- Export PDF ---
+// --- Corporate Targets ---
+function renderCorporateTargets() {
+    // 1. Determine "Now" (Simulation Date)
+    // We use the current date for "Year to Date" logic.
+    const NOW = new Date();
+    const currentYear = NOW.getFullYear();
+
+    // We only care about 2026 targets as per request, but let's make it slightly dynamic to the current year if it matches data
+    // actually user said "28767 euro daily target based on how many days of 2026 has passed"
+    // So we assume the context is 2026. If we are in 2025, this might look weird, but let's stick to the requested logic.
+    // If the data is from 2024, showing 2026 targets might be off. 
+    // Let's use the Max Date from data as "Today" to behave correct retrospectively? 
+    // Or just use real wall-clock time? 
+    // User said "how many days of 2026 has passed". Implies wall clock if we are in 2026, or full year if passed.
+
+    // Let's use a Hybrid approach: 
+    // If data has 2026 entries, use the max date of 2026 entries as "Current Point" in the year? 
+    // Or just standard "Days Passed in Year". 
+    // Given "Sales Report" context, usually it's "YTD" relative to the report generation time.
+
+    // Hardcoded Targets for 2026 as requested
+    const TARGET_YEAR = 2026;
+    const T_DAILY_AMT = 28767;
+    const T_QUARTER_AMT = 2625000;
+    const T_ANNUAL_AMT = 10500000;
+
+    // Filter Global Data for the target year (ignoring dashboard filters!)
+    const globalData2026 = state.rawData.filter(r => r.date.getFullYear() === TARGET_YEAR);
+
+    // 1. Annual Progress
+    const actualAnnual = globalData2026.reduce((sum, r) => sum + r.netEur, 0);
+    updateInfographic('Annual', actualAnnual, T_ANNUAL_AMT);
+
+    // 2. Quarterly Progress
+    // Which quarter? The quarter of the "Latest Sale" or "Current Wall Clock"?
+    // Usually "Current Quarter". 
+    // Let's find the max date in data to determine "Current Report Quarter"
+    let maxDate = new Date();
+    if (globalData2026.length > 0) {
+        const timestamps = globalData2026.map(r => r.date.getTime());
+        maxDate = new Date(Math.max(...timestamps));
+    }
+
+    const currentQ = Math.floor((maxDate.getMonth() + 3) / 3);
+
+    // Sum data for this quarter
+    const actualQuarter = globalData2026
+        .filter(r => Math.floor((r.date.getMonth() + 3) / 3) === currentQ)
+        .reduce((sum, r) => sum + r.netEur, 0);
+
+    updateInfographic('Quarter', actualQuarter, T_QUARTER_AMT);
+
+    // 3. Daily (Cumulative) Progress
+    // "Days passed * 28767"
+    // Days passed from Jan 1st to MaxDate (inclusive)
+    const startOfYear = new Date(TARGET_YEAR, 0, 1);
+
+    // Normalize to midnight
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const utc1 = Date.UTC(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate());
+    const utc2 = Date.UTC(startOfYear.getFullYear(), startOfYear.getMonth(), startOfYear.getDate());
+    const daysPassed = Math.floor((utc1 - utc2) / msPerDay) + 1;
+
+    const targetDailyCum = daysPassed * T_DAILY_AMT;
+    // Actual is same as YTD (Annual) because it's cumulative? 
+    // "First bar should show the daily target... vs Actual"
+    // Usually "Daily Cumulative" implies "Are we on track YTD?". So Actual = Annual YTD.
+
+    updateInfographic('Daily', actualAnnual, targetDailyCum, daysPassed);
+}
+
+function renderManagerTargets() {
+    const container = document.getElementById('managerTargetsContainer');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // Fixed Managers
+    const managers = ["KAMİL ŞEREFOĞLU", "KORCAN TÜRKMEN", "NASUH DURMAZ"];
+    const TARGET_YEAR = 2026;
+
+    // Determine "Current Point" in time from data (for fair comparison)
+    const globalData2026 = state.rawData.filter(r => r.date.getFullYear() === TARGET_YEAR);
+    let maxDate = new Date(); // Default to now if no data
+    if (globalData2026.length > 0) {
+        const timestamps = globalData2026.map(r => r.date.getTime());
+        maxDate = new Date(Math.max(...timestamps));
+    }
+
+    const startOfYear = new Date(TARGET_YEAR, 0, 1);
+
+    // Normalize to midnight to avoid time/timezone off-by-one errors
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const utc1 = Date.UTC(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate());
+    const utc2 = Date.UTC(startOfYear.getFullYear(), startOfYear.getMonth(), startOfYear.getDate());
+    const daysPassed = Math.floor((utc1 - utc2) / msPerDay) + 1;
+
+    // Quarterly Calculation Details
+    const currentMonth = maxDate.getMonth(); // 0-11
+    const currentQuarter = Math.floor(currentMonth / 3) + 1; // 1-4
+    // Quarter Months (0-based)
+    const qStartMonth = (currentQuarter - 1) * 3;
+    const qEndMonth = qStartMonth + 2;
+
+    managers.forEach(mgr => {
+        const targetAnnual = state.targets[mgr] || 0;
+        if (targetAnnual === 0) return;
+
+        // Calculations
+        const targetDaily = targetAnnual / 365;
+        const targetDailyCum = targetDaily * daysPassed;
+
+        // Quarterly Target: Exact Quarter of Yearly Target
+        const targetQuarterly = targetAnnual / 4;
+
+        // Actuals
+        const mgrData = globalData2026.filter(r => r.manager === mgr);
+        const actualAnnual = mgrData.reduce((s, r) => s + r.netEur, 0);
+
+        // Actual Quarterly: Sum of sales in current quarter months
+        const actualQuarterly = mgrData
+            .filter(r => {
+                const m = r.date.getMonth();
+                return m >= qStartMonth && m <= qEndMonth;
+            })
+            .reduce((s, r) => s + r.netEur, 0);
+
+        const actualDailyCum = actualAnnual;
+
+        // Percentages
+        const pctAnnual = (actualAnnual / targetAnnual) * 100;
+        const pctQuarterly = (actualQuarterly / targetQuarterly) * 100;
+        const pctDaily = (actualDailyCum / targetDailyCum) * 100;
+
+        // HTML
+        const card = document.createElement('div');
+        card.className = 'manager-target-card';
+        card.innerHTML = `
+            <div class="mgr-header">
+                <span class="mgr-name">${mgr}</span>
+                <span class="mgr-total-tgt">Hedef: ${FORMATTER.currency(targetAnnual, 'EUR')}</span>
+            </div>
+            
+            <!-- Daily (Cumulative) -->
+            <div class="mgr-progress-row">
+                <div class="mgr-prog-label">
+                    <span>Günlük (Kümülatif)</span>
+                    <span>%${pctDaily.toFixed(1)}</span>
+                </div>
+                <div class="progress-track mini">
+                    <div class="progress-fill mini fill-daily" style="width: ${Math.min(pctDaily, 100)}%"></div>
+                </div>
+                <div class="mgr-prog-label">
+                    <small>Hedef: ${FORMATTER.currency(targetDailyCum, 'EUR')}</small>
+                    <small class="mgr-prog-val">${FORMATTER.currency(actualDailyCum, 'EUR')}</small>
+                </div>
+            </div>
+
+            <!-- Quarterly -->
+            <div class="mgr-progress-row">
+                <div class="mgr-prog-label">
+                    <span>Çeyreklik (Q${currentQuarter})</span>
+                    <span>%${pctQuarterly.toFixed(1)}</span>
+                </div>
+                <div class="progress-track mini">
+                    <div class="progress-fill mini fill-quarterly" style="width: ${Math.min(pctQuarterly, 100)}%"></div>
+                </div>
+                <div class="mgr-prog-label">
+                    <small>Hedef: ${FORMATTER.currency(targetQuarterly, 'EUR')}</small>
+                    <small class="mgr-prog-val">${FORMATTER.currency(actualQuarterly, 'EUR')}</small>
+                </div>
+            </div>
+
+            <!-- Annual -->
+            <div class="mgr-progress-row">
+                <div class="mgr-prog-label">
+                    <span>Yıllık</span>
+                    <span>%${pctAnnual.toFixed(1)}</span>
+                </div>
+                <div class="progress-track mini">
+                    <div class="progress-fill mini fill-annual" style="width: ${Math.min(pctAnnual, 100)}%"></div>
+                </div>
+                <div class="mgr-prog-label">
+                    <small>Hedef: ${FORMATTER.currency(targetAnnual, 'EUR')}</small>
+                    <small class="mgr-prog-val">${FORMATTER.currency(actualAnnual, 'EUR')}</small>
+                </div>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+function updateInfographic(type, actual, target, extraInfo) {
+    const pct = target > 0 ? (actual / target) * 100 : 0;
+    const pctStr = `%${pct.toFixed(1)}`;
+    const actualStr = FORMATTER.currency(actual, 'EUR');
+
+    // Update DOM
+    const elPct = document.getElementById(`info${type}Pct`);
+    const elBar = document.getElementById(`prog${type}`);
+    const elAct = document.getElementById(`info${type}Act`);
+
+    if (elPct) elPct.textContent = pctStr;
+    if (elBar) elBar.style.width = `${Math.min(pct, 100)}%`;
+    if (elAct) elAct.textContent = actualStr;
+
+    // Special handling for Daily Label updates if needed
+    if (type === 'Daily' && extraInfo) {
+        // Update label with target value?
+        const elTgt = document.getElementById('dailyTgtVal');
+        if (elTgt) elTgt.textContent = `${FORMATTER.currency(target, 'EUR')} (${extraInfo}. Gün)`;
+    }
+}
 async function exportDashboardToPDF() {
     const btn = document.getElementById('exportPdfBtn');
     const originalText = btn.innerHTML;
@@ -1208,46 +1338,60 @@ async function exportDashboardToPDF() {
     btn.disabled = true;
 
     try {
-        // Elements to hide strictly (display: none) to save space
+        // 1. Prepare Print Header Data
+        const dates = state.filteredData.map(r => r.date);
+        let dateStr = "Tüm Zamanlar";
+        if (dates.length > 0) {
+            const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
+            const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
+            const fmt = { day: 'numeric', month: 'long', year: 'numeric' };
+            dateStr = `${minDate.toLocaleDateString('tr-TR', fmt)} - ${maxDate.toLocaleDateString('tr-TR', fmt)}`;
+        }
+        document.getElementById('printDateRange').textContent = dateStr;
+
+        // 2. Elements to hide strictly (display: none) to save space
         const tableSection = document.querySelector('.table-section');
         const originalDisplay = tableSection ? tableSection.style.display : '';
         if (tableSection) tableSection.style.display = 'none';
 
-        // Elements to hide visually (visibility: hidden) to keep layout
+        // 3. Elements to hide visually (visibility: hidden) to keep layout during capture if they overlap
+        // Note: .filter-bar is now hidden via CSS in .printing-mode
         const hiddenElements = [
             document.getElementById('ratesBtn'),
             document.getElementById('targetsBtn'),
             document.getElementById('fileInput').parentElement.parentElement, // Upload overlay if visible
             btn
         ];
-
-        // Hide them
         hiddenElements.forEach(el => { if (el) el.style.visibility = 'hidden'; });
 
+        // 4. Add printing class (Triggers CSS changes: Show Header, Hide FilterBar, Grid Layout)
+        document.body.classList.add('printing-mode');
+
         const element = document.getElementById('mainDashboard');
+
         // Capture
         const canvas = await html2canvas(element, {
             scale: 2, // High resolution
             useCORS: true,
             logging: false,
-            windowWidth: element.scrollWidth,
-            windowHeight: element.scrollHeight
+            windowWidth: element.scrollWidth, // Capture full width
+            windowHeight: element.scrollHeight, // Capture full height
+            onclone: (clonedDoc) => {
+                // Ensure print header is visible in clone if needed, but CSS should handle it
+            }
         });
 
-        // Restore visibility immediately
+        // 5. Cleanup
         hiddenElements.forEach(el => { if (el) el.style.visibility = 'visible'; });
         if (tableSection) tableSection.style.display = originalDisplay;
+        document.body.classList.remove('printing-mode');
 
         // Generate PDF
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const { jsPDF } = window.jspdf;
 
-        // Calculate dimensions to fit A4 or custom size
         const imgWidth = canvas.width;
         const imgHeight = canvas.height;
-
-        // A4 landscape: 297mm x 210mm
-        // We might want a continuous scroll or just fit width
         const pdf = new jsPDF('p', 'mm', 'a4');
         const pdfWidth = pdf.internal.pageSize.getWidth();
         const pdfHeight = pdf.internal.pageSize.getHeight();
@@ -1255,11 +1399,8 @@ async function exportDashboardToPDF() {
         const ratio = pdfWidth / imgWidth;
         const finalHeight = imgHeight * ratio;
 
-        // If it's too long, maybe split? For now, we scale to fit width and let height be whatever (single page mainly)
-        // If content > page height, we might need custom page size
         if (finalHeight > pdfHeight) {
-            // Create custom size PDF matching the content aspect ratio
-            const customPdf = new jsPDF('p', 'mm', [finalHeight + 20, pdfWidth]); // +20 padding
+            const customPdf = new jsPDF('p', 'mm', [finalHeight + 20, pdfWidth]);
             customPdf.addImage(imgData, 'JPEG', 0, 10, pdfWidth, finalHeight);
             customPdf.save("satis-raporu.pdf");
         } else {
