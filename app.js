@@ -57,7 +57,8 @@ const COLS = {
 const FORMATTER = {
     currency: (val, curr = 'EUR') => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: curr }).format(val),
     number: (val) => new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 2 }).format(val),
-    date: (date) => date ? new Date(date).toLocaleDateString('tr-TR') : '-'
+    date: (date) => date ? new Date(date).toLocaleDateString('tr-TR') : '-',
+    percent: (val, d = 1) => '%' + new Intl.NumberFormat('tr-TR', { maximumFractionDigits: d, minimumFractionDigits: d }).format(val)
 };
 
 // --- Initialization ---
@@ -525,7 +526,7 @@ function renderKPIs() {
         // User requested: (Total Net Sales / Total Targets) * 100
         // effectiveTotalEur is the total net sales (converted/normalized)
         const attainment = (effectiveTotalEur / targetSum) * 100;
-        document.getElementById('kpiTargetAttainment').textContent = `Hedef: %${attainment.toFixed(1)}`;
+        document.getElementById('kpiTargetAttainment').textContent = `Hedef: ${FORMATTER.percent(attainment)}`;
 
         // Optional: Colorize based on attainment (e.g. Green if > 100)
         const kpiValEl = document.getElementById('kpiNetSales');
@@ -907,7 +908,7 @@ function generateLegend(containerId, items) {
         row.innerHTML = `
             <span class="legend-dot" style="background-color: ${item.color}"></span>
             <span class="legend-label" title="${item.label}">${item.label}</span>
-            <span class="legend-val">${percent}%</span>
+            <span class="legend-val">${FORMATTER.percent(percent, 0)}</span>
         `;
         container.appendChild(row);
     });
@@ -1265,7 +1266,7 @@ function renderManagerTargets() {
             <div class="mgr-progress-row">
                 <div class="mgr-prog-label">
                     <span>Günlük (Kümülatif)</span>
-                    <span>%${pctDaily.toFixed(1)}</span>
+                    <span>${FORMATTER.percent(pctDaily)}</span>
                 </div>
                 <div class="progress-track mini">
                     <div class="progress-fill mini fill-daily" style="width: ${Math.min(pctDaily, 100)}%"></div>
@@ -1280,7 +1281,7 @@ function renderManagerTargets() {
             <div class="mgr-progress-row">
                 <div class="mgr-prog-label">
                     <span>Çeyreklik (Q${currentQuarter})</span>
-                    <span>%${pctQuarterly.toFixed(1)}</span>
+                    <span>${FORMATTER.percent(pctQuarterly)}</span>
                 </div>
                 <div class="progress-track mini">
                     <div class="progress-fill mini fill-quarterly" style="width: ${Math.min(pctQuarterly, 100)}%"></div>
@@ -1295,7 +1296,7 @@ function renderManagerTargets() {
             <div class="mgr-progress-row">
                 <div class="mgr-prog-label">
                     <span>Yıllık</span>
-                    <span>%${pctAnnual.toFixed(1)}</span>
+                    <span>${FORMATTER.percent(pctAnnual)}</span>
                 </div>
                 <div class="progress-track mini">
                     <div class="progress-fill mini fill-annual" style="width: ${Math.min(pctAnnual, 100)}%"></div>
@@ -1312,7 +1313,7 @@ function renderManagerTargets() {
 
 function updateInfographic(type, actual, target, extraInfo) {
     const pct = target > 0 ? (actual / target) * 100 : 0;
-    const pctStr = `%${pct.toFixed(1)}`;
+    const pctStr = FORMATTER.percent(pct);
     const actualStr = FORMATTER.currency(actual, 'EUR');
 
     // Update DOM
