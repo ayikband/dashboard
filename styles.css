@@ -378,6 +378,35 @@ input:checked+.slider:before {
     color: var(--warning);
 }
 
+.kpi-card .value.danger {
+    color: var(--danger);
+}
+
+.kpi-card .danger-text {
+    color: var(--danger);
+    opacity: 0.9;
+}
+
+.doubtful-card {
+    border-color: rgba(231, 76, 60, 0.3) !important;
+    background: linear-gradient(145deg, var(--surface) 0%, rgba(231, 76, 60, 0.05) 100%);
+}
+
+.doubtful-val-main {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--danger);
+}
+
+.currency-row.doubtful-row {
+    border-color: rgba(231, 76, 60, 0.2);
+    background: rgba(231, 76, 60, 0.03);
+}
+
+.currency-row.doubtful-row .curr-value {
+    color: var(--danger);
+}
+
 .kpi-card .subtext {
     font-size: 0.85rem;
     color: var(--text-muted);
@@ -492,6 +521,7 @@ input:checked+.slider:before {
     font-size: 0.85rem;
     color: var(--text-muted);
     width: 100%;
+    padding-right: 0.5rem;
 }
 
 .legend-dot {
@@ -506,19 +536,21 @@ input:checked+.slider:before {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 100px;
 }
 
 .legend-val {
     font-weight: 600;
     color: var(--text);
-    margin-left: auto;
     font-size: 0.85rem;
+    margin-left: 8px;
+    text-align: right;
 }
 
 .custom-legend.small .legend-item {
     font-size: 0.75rem;
     gap: 0.4rem;
+    width: auto;
+    padding-right: 0;
 }
 
 .custom-legend.small .legend-dot {
