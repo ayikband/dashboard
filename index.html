@@ -12,8 +12,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
     <!-- External Libs -->
-    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -139,13 +138,20 @@
                 <div class="subtext">Bu dönem aktif</div>
             </div>
             <div class="card kpi-card">
-                <h3>Ürün / Hizmet Dağılımı</h3>
+                <h3>Ürün / Servis Dağılımı</h3>
                 <div class="chart-with-legend">
                     <div class="mini-chart-wrapper">
                         <canvas id="kpiChartMix"></canvas>
                     </div>
                     <div id="kpiLegendMix" class="custom-legend small"></div>
                 </div>
+            </div>
+            
+            <!-- Doubtful Receivables (Şüpheli Alacaklar) -->
+            <div class="card kpi-card doubtful-card" id="doubtfulContainer" style="display: none;">
+                <h3>Şüpheli Alacaklar</h3>
+                <div class="value danger" id="doubtfulValue">--</div>
+                <div class="subtext danger-text" id="doubtfulCount">-- Adet Şüpheli / Ödenmemiş Fatura</div>
             </div>
         </section>
 
