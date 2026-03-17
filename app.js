@@ -6,7 +6,9 @@
 // --- State Management ---
 const state = {
     rawData: [],        // Full dataset from Excel
+    doubtfulData: [],   // Unpaid/suspicious invoices from second sheet
     filteredData: [],   // Currently active dataset
+    filteredDoubtfulData: [], // Filtered doubtful dataset
     managers: [],       // List of unique managers
     targets: {
         "KAMİL ŞEREFOĞLU": 4300000,
@@ -135,14 +137,20 @@ function handleFileUpload(e) {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
 
-            // Read first sheet
+            // Read first sheet (Main Data)
             const sheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[sheetName];
-
-            // Convert to JSON with headers
             const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
 
-            processRawData(jsonData);
+            // Read second sheet (Doubtful Receivables) if exists
+            let doubtfulJsonData = [];
+            if (workbook.SheetNames.length > 1) {
+                const doubtfulSheetName = workbook.SheetNames[1];
+                const doubtfulWorksheet = workbook.Sheets[doubtfulSheetName];
+                doubtfulJsonData = XLSX.utils.sheet_to_json(doubtfulWorksheet, { defval: "" });
+            }
+
+            processRawData(jsonData, doubtfulJsonData);
 
             // UI Transition
             document.getElementById('uploadOverlay').classList.add('hidden');
@@ -187,74 +195,16 @@ function findBestColumn(row, candidates) {
     return null;
 }
 
-function processRawData(json) {
-    // Detect Columns dynamically if possible
-    let tlCol = COLS.NET_TL;
-    let usdCol = COLS.NET_ORIG_USD;
-    let gbpCol = COLS.NET_ORIG_GBP;
-    let eurOrigCol = COLS.NET_ORIG_EUR;
+function processRawData(json, doubtfulJson = []) {
+    // 1. Normalize Main Data
+    let rawMainData = normalizeJsonData(json);
+    
+    // Normalize Doubtful Data
+    state.doubtfulData = normalizeJsonData(doubtfulJson, rawMainData.length); // Offset IDs
 
-    if (json.length > 0) {
-        const row0 = json[0];
-        // Candidates
-        const candidatesTL = ["KDV HARİÇ TL", "KDV HARİÇ TUTAR", "TUTAR", "NET TUTAR", "TL TUTAR", "TL"];
-        const candidatesUSD = ["KDV HARİÇ (USD)", "USD TUTAR", "USD", "DOLAR"];
-        const candidatesGBP = ["KDV HARİÇ (GBP)", "GBP TUTAR", "GBP", "STERLİN"];
-        const candidatesEUR = ["KDV HARİÇ (EURO)", "EURO TUTAR", "EURO", "EUR", "AVRO"];
-
-        const foundTL = findBestColumn(row0, candidatesTL);
-        if (foundTL) tlCol = foundTL;
-
-        const foundUSD = findBestColumn(row0, candidatesUSD);
-        if (foundUSD) usdCol = foundUSD;
-
-        const foundGBP = findBestColumn(row0, candidatesGBP);
-        if (foundGBP) gbpCol = foundGBP;
-
-        const foundEUR = findBestColumn(row0, candidatesEUR);
-        if (foundEUR) eurOrigCol = foundEUR;
-    }
-
-    // 1. Normalize Rows
-    state.rawData = json.map((row, idx) => {
-        // Parse numerics
-        // Use detected column or fallbacks
-        const netTl = parseNumberTR(row[tlCol]);
-        const netEur = parseNumberTR(row[COLS.NET_EUR_EQV]);
-        const netOrigEur = parseNumberTR(row[eurOrigCol]);
-        const netOrigUsd = parseNumberTR(row[usdCol]);
-        const netOrigGbp = parseNumberTR(row[gbpCol]);
-
-        // Parse date
-        const dateRaw = row[COLS.DATE];
-        let dateObj = null;
-        if (typeof dateRaw === 'number') {
-            // Excel serial date
-            dateObj = new Date(Math.round((dateRaw - 25569) * 86400 * 1000));
-        } else if (typeof dateRaw === 'string') {
-            const parts = dateRaw.split('.');
-            if (parts.length === 3) dateObj = new Date(parts[2], parts[1] - 1, parts[0]);
-        }
-
-        return {
-            id: idx,
-            firm: (row[COLS.FIRM] || "").trim(),
-            date: dateObj,
-            invNo: row[COLS.INV_NO],
-            region: (row[COLS.REGION] || "Unknown").trim(),
-            city: (row[COLS.CITY] || "").trim(),
-            type: (row[COLS.TYPE] || "Material").trim(), // Default to Material if empty
-            currency: (row[COLS.CURRENCY] || "TL").trim(),
-            netEur: netEur,
-            netTl: netTl,
-            netOrigEur: netOrigEur,
-            netOrigUsd: netOrigUsd,
-            netOrigGbp: netOrigGbp,
-            excelNetEur: netEur, // Store original Excel value
-            vatTl: parseNumberTR(row[COLS.VAT_TL]),
-            manager: (row[COLS.MANAGER] || "Unassigned").trim()
-        };
-    }).filter(r => r.date && !isNaN(r.netEur)); // Filter invalid rows
+    // Remove doubtful invoices from main data based on 'invNo'
+    const doubtfulInvoiceNumbers = new Set(state.doubtfulData.map(r => r.invNo));
+    state.rawData = rawMainData.filter(r => !doubtfulInvoiceNumbers.has(r.invNo));
 
     // 2. Extract Quarter info from first row
     if (state.rawData.length > 0) {
@@ -286,6 +236,69 @@ function processRawData(json) {
     recalculateNormalizedValues();
     state.managers = [...new Set(state.rawData.map(r => r.manager))].sort();
     applyFilters();
+}
+
+function normalizeJsonData(json, idOffset = 0) {
+    if (!json || json.length === 0) return [];
+    
+    let tlCol = COLS.NET_TL;
+    let usdCol = COLS.NET_ORIG_USD;
+    let gbpCol = COLS.NET_ORIG_GBP;
+    let eurOrigCol = COLS.NET_ORIG_EUR;
+
+    const row0 = json[0];
+    const candidatesTL = ["KDV HARİÇ TL", "KDV HARİÇ TUTAR", "TUTAR", "NET TUTAR", "TL TUTAR", "TL"];
+    const candidatesUSD = ["KDV HARİÇ (USD)", "USD TUTAR", "USD", "DOLAR"];
+    const candidatesGBP = ["KDV HARİÇ (GBP)", "GBP TUTAR", "GBP", "STERLİN"];
+    const candidatesEUR = ["KDV HARİÇ (EURO)", "EURO TUTAR", "EURO", "EUR", "AVRO"];
+
+    const foundTL = findBestColumn(row0, candidatesTL);
+    if (foundTL) tlCol = foundTL;
+
+    const foundUSD = findBestColumn(row0, candidatesUSD);
+    if (foundUSD) usdCol = foundUSD;
+
+    const foundGBP = findBestColumn(row0, candidatesGBP);
+    if (foundGBP) gbpCol = foundGBP;
+
+    const foundEUR = findBestColumn(row0, candidatesEUR);
+    if (foundEUR) eurOrigCol = foundEUR;
+
+    return json.map((row, idx) => {
+        const netTl = parseNumberTR(row[tlCol]);
+        const netEur = parseNumberTR(row[COLS.NET_EUR_EQV]);
+        const netOrigEur = parseNumberTR(row[eurOrigCol]);
+        const netOrigUsd = parseNumberTR(row[usdCol]);
+        const netOrigGbp = parseNumberTR(row[gbpCol]);
+
+        const dateRaw = row[COLS.DATE];
+        let dateObj = null;
+        if (typeof dateRaw === 'number') {
+            dateObj = new Date(Math.round((dateRaw - 25569) * 86400 * 1000));
+        } else if (typeof dateRaw === 'string') {
+            const parts = dateRaw.split('.');
+            if (parts.length === 3) dateObj = new Date(parts[2], parts[1] - 1, parts[0]);
+        }
+
+        return {
+            id: idOffset + idx,
+            firm: (row[COLS.FIRM] || "").trim(),
+            date: dateObj,
+            invNo: row[COLS.INV_NO],
+            region: (row[COLS.REGION] || "Unknown").trim(),
+            city: (row[COLS.CITY] || "").trim(),
+            type: (row[COLS.TYPE] || "Material").trim(),
+            currency: (row[COLS.CURRENCY] || "TL").trim(),
+            netEur: netEur,
+            netTl: netTl,
+            netOrigEur: netOrigEur,
+            netOrigUsd: netOrigUsd,
+            netOrigGbp: netOrigGbp,
+            excelNetEur: netEur,
+            vatTl: parseNumberTR(row[COLS.VAT_TL]),
+            manager: (row[COLS.MANAGER] || "Unassigned").trim()
+        };
+    }).filter(r => r.date && !isNaN(r.netEur));
 }
 
 function parseNumberTR(val) {
@@ -387,6 +400,18 @@ function applyFilters() {
             (!state.filters.search || row.firm.toLowerCase().includes(state.filters.search));
     });
 
+    state.filteredDoubtfulData = state.doubtfulData.filter(row => {
+        const rowMonth = row.date.toLocaleString('tr-TR', { month: 'long', year: 'numeric' });
+
+        return (!state.filters.month || rowMonth === state.filters.month) &&
+            (!state.filters.manager || row.manager === state.filters.manager) &&
+            (!state.filters.region || row.region === state.filters.region) &&
+            (!state.filters.city || row.city === state.filters.city) &&
+            (!state.filters.type || row.type === state.filters.type) &&
+            (!state.filters.currency || row.currency === state.filters.currency) &&
+            (!state.filters.search || row.firm.toLowerCase().includes(state.filters.search));
+    });
+
     state.settings.currentPage = 1; // Reset pagination
     updateDashboard();
 }
@@ -397,6 +422,7 @@ function updateDashboard() {
     try { renderCorporateTargets(); } catch (e) { console.error("Corp Target Error:", e); }
     try { renderManagerTargets(); } catch (e) { console.error("Mgr Target Error:", e); }
     try { renderTopManagerCustomers(); } catch (e) { console.error("Top Customers Error:", e); }
+    try { renderDoubtfulReceivables(); } catch (e) { console.error("Doubtful Area Error:", e); }
     try {
         sortData();
         renderTable();
@@ -404,6 +430,60 @@ function updateDashboard() {
 }
 
 // --- KPIs ---
+function renderDoubtfulReceivables() {
+    const elContainer = document.getElementById('doubtfulContainer');
+    if (!elContainer) return;
+
+    if (state.doubtfulData.length === 0) {
+        elContainer.style.display = 'none'; // Hide if no data exists at all
+        return;
+    } else {
+        elContainer.style.display = 'block';
+    }
+
+    const d = state.filteredDoubtfulData;
+    const isNorm = state.settings.useNormalized;
+
+    let totalEur = 0;
+    let counts = d.length;
+
+    const sums = { EUR: 0, USD: 0, GBP: 0, TRY: 0 };
+
+    d.forEach(r => {
+        const curr = (r.currency || "TL").trim().toUpperCase();
+
+        if (curr === 'TL' || curr === 'TRY' || curr === 'TRL') {
+            sums.TRY += (r.netTl || 0);
+        } else if (curr === 'USD' || curr.includes('DOLAR')) {
+            sums.USD += (r.netOrigUsd || 0);
+        } else if (curr === 'GBP' || curr.includes('STERLİN')) {
+            sums.GBP += (r.netOrigGbp || 0);
+        } else if (curr.includes('EUR') || curr === 'EURO') {
+            sums.EUR += (r.netOrigEur || r.netEur);
+        } else {
+            sums.TRY += (r.netTl || 0);
+        }
+    });
+
+    let displayHtml = "";
+
+    if (isNorm) {
+        totalEur = d.reduce((acc, row) => acc + row.netEur, 0);
+        displayHtml = `<div class="doubtful-val-main">${FORMATTER.currency(totalEur, 'EUR')}</div>`;
+    } else {
+        const rowsHTML = [];
+        if (sums.EUR > 0) rowsHTML.push(`<div class="currency-row doubtful-row"><span class="curr-label">EUR</span><span class="curr-value">${FORMATTER.currency(sums.EUR, 'EUR')}</span></div>`);
+        if (sums.USD > 0) rowsHTML.push(`<div class="currency-row doubtful-row"><span class="curr-label">USD</span><span class="curr-value">${FORMATTER.currency(sums.USD, 'USD')}</span></div>`);
+        if (sums.GBP > 0) rowsHTML.push(`<div class="currency-row doubtful-row"><span class="curr-label">GBP</span><span class="curr-value">${FORMATTER.currency(sums.GBP, 'GBP')}</span></div>`);
+        if (sums.TRY > 0) rowsHTML.push(`<div class="currency-row doubtful-row"><span class="curr-label">TL</span><span class="curr-value">${FORMATTER.currency(sums.TRY, 'TRY')}</span></div>`);
+
+        displayHtml = rowsHTML.length ? `<div class="currency-breakdown text-right">${rowsHTML.join('')}</div>` : `<div class="doubtful-val-main">0 €</div>`;
+    }
+
+    document.getElementById('doubtfulValue').innerHTML = displayHtml;
+    document.getElementById('doubtfulCount').textContent = `${counts} Adet Şüpheli / Ödenmemiş Fatura`;
+}
+
 function renderKPIs() {
     const d = state.filteredData;
     const isNorm = state.settings.useNormalized;
@@ -1342,13 +1422,22 @@ async function exportDashboardToPDF() {
         // 1. Prepare Print Header Data
         const dates = state.filteredData.map(r => r.date);
         let dateStr = "Tüm Zamanlar";
+        let fileNameDate = "Tarihsiz"; // Default fallback if no data
+
         if (dates.length > 0) {
             const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
             const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
             const fmt = { day: 'numeric', month: 'long', year: 'numeric' };
             dateStr = `${minDate.toLocaleDateString('tr-TR', fmt)} - ${maxDate.toLocaleDateString('tr-TR', fmt)}`;
+
+            // Create filename date string (DD.MM.YYYY)
+            const d = String(maxDate.getDate()).padStart(2, '0');
+            const m = String(maxDate.getMonth() + 1).padStart(2, '0');
+            const y = maxDate.getFullYear();
+            fileNameDate = `${d}.${m}.${y}`;
         }
         document.getElementById('printDateRange').textContent = dateStr;
+        const finalPdfName = `${fileNameDate} Satış Raporu.pdf`;
 
         // 2. Elements to hide strictly (display: none) to save space
         const tableSection = document.querySelector('.table-section');
@@ -1403,10 +1492,10 @@ async function exportDashboardToPDF() {
         if (finalHeight > pdfHeight) {
             const customPdf = new jsPDF('p', 'mm', [finalHeight + 20, pdfWidth]);
             customPdf.addImage(imgData, 'JPEG', 0, 10, pdfWidth, finalHeight);
-            customPdf.save("satis-raporu.pdf");
+            customPdf.save(finalPdfName);
         } else {
             pdf.addImage(imgData, 'JPEG', 0, 10, pdfWidth, finalHeight);
-            pdf.save("satis-raporu.pdf");
+            pdf.save(finalPdfName);
         }
 
     } catch (err) {
